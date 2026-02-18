@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Pool Safety Sensor</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <h1>Wireless Pool Safety Sensor</h1>
+
+      <div id="banner" class="banner hidden"></div>
+
+      <div class="card">
+        <h2>Status</h2>
+        <div class="grid">
+          <div><span class="label">Boundary:</span> <span id="boundary">unknown</span></div>
+          <div><span class="label">In Pool:</span> <span id="inpool">unknown</span></div>
+          <div><span class="label">Alive:</span> <span id="alive">unknown</span></div>
+          <div><span class="label">Stream:</span> <span id="stream">off</span></div>
+        </div>
+        <div class="small">
+          <span class="label">Last event:</span> <span id="lastevent">-</span>
+          <span class="label">Time:</span> <span id="lasttime">-</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>User Controls</h2>
+        <div class="row">
+          <input id="token" placeholder="Control token (dev-token-change-me)" />
+          <button id="btnOn">View Live</button>
+          <button id="btnOff">Disconnect</button>
+        </div>
+
+        <div id="liveArea" class="live hidden">
+          <h3>Live Feed (placeholder)</h3>
+          <div class="placeholder">When you add MJPEG/WebRTC later, it shows here.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Dev Simulation</h2>
+        <div class="row">
+          <button data-sim="boundary">Set Boundary</button>
+          <button data-sim="enter">Enter Pool</button>
+          <button data-sim="alive">Alive</button>
+          <button data-sim="distress">Distress</button>
+          <button data-sim="exit">Exit Pool</button>
+        </div>
+        <p class="small muted">
+          These endpoints simulate YOLO events now. Later, YOLO will call the same internal functions.
+        </p>
+      </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
