@@ -13,3 +13,9 @@ body { font-family: system-ui, sans-serif; margin: 0; background: #f6f7fb; }
 input { padding: 10px; border-radius: 10px; border: 1px solid #ccc; min-width: 260px; }
 button { padding: 10px 12px; border-radius: 10px; border: 0; cursor: pointer; background: #111827; color: white; }
 button:hover { opacity: 0.9; }
+.liveimg {
+  width: 100%;
+  max-width: 820px;
+  border-radius: 12px;
+  background: #f0f2f7;
+}

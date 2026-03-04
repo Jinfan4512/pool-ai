@@ -10,6 +10,7 @@ const els = {
   btnOn: document.getElementById("btnOn"),
   btnOff: document.getElementById("btnOff"),
   liveArea: document.getElementById("liveArea"),
+  liveImg: document.getElementById("liveImg"),
 };
 
 function showBanner(msg, level) {
@@ -76,22 +77,35 @@ function connectWS() {
   };
 }
 
+let streamKey = null;
+
 async function controlStream(on) {
   const token = (els.token.value || "").trim();
-if (!token) {
-  alert("Please enter the control token first.");
-  return;
-}
+  if (!token) {
+    alert("Please enter the control token first.");
+    return;
+  }
 
   const url = on ? "/api/stream/on" : "/api/stream/off";
+
   const r = await fetch(url, {
     method: "POST",
     headers: { "X-Control-Token": token },
   });
 
+  const j = await r.json().catch(() => ({}));
+
   if (!r.ok) {
-    const j = await r.json().catch(() => ({}));
     alert(`Control failed: ${r.status} ${j.detail || ""}`.trim());
+    return;
+  }
+
+  if (on) {
+    streamKey = j.stream_key;
+    els.liveImg.src = `/video/mjpeg?key=${encodeURIComponent(streamKey)}&t=${Date.now()}`;
+  } else {
+    streamKey = null;
+    els.liveImg.src = "";
   }
 }
 
