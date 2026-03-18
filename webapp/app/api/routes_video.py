@@ -4,37 +4,37 @@ from typing import Generator, Optional
 import cv2
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+from picamera2 import Picamera2
 
 from app.services.state import STATE
 from app.services.stream_session import SESSION
 
 router = APIRouter(prefix="/video", tags=["video"])
 
-# Use laptop webcam for now. Try 0 first; if camera doesn't open, try 1.
-CAMERA_INDEX = 0
-
 def mjpeg_generator() -> Generator[bytes, None, None]:
-    cap = cv2.VideoCapture(CAMERA_INDEX)
-    if not cap.isOpened():
-        raise RuntimeError(
-            "Could not open camera. Try changing CAMERA_INDEX to 1, "
-            "or allow camera permission for your terminal/VS Code."
-        )
+    picam2 = Picamera2()
+
+    # 1280x720 is a good starting point for live streaming
+    config = picam2.create_video_configuration(
+        main={"size": (1280, 720)}
+    )
+    picam2.configure(config)
+    picam2.start()
 
     boundary = b"--frame"
 
     try:
         while True:
-            # Stop if user turned stream off
             if not STATE.streaming_enabled:
                 break
 
-            ok, frame = cap.read()
-            if not ok:
-                time.sleep(0.05)
-                continue
+            # Picamera2 returns RGB array
+            frame = picam2.capture_array()
 
-            ok, jpg = cv2.imencode(".jpg", frame)
+            # Convert RGB to BGR for OpenCV encoding
+            frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+            ok, jpg = cv2.imencode(".jpg", frame_bgr)
             if not ok:
                 continue
 
@@ -45,13 +45,12 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
             yield f"Content-Length: {len(data)}\r\n\r\n".encode("utf-8")
             yield data + b"\r\n"
 
-            time.sleep(0.03)  # ~30 fps
+            time.sleep(0.03)
     finally:
-        cap.release()
+        picam2.stop()
 
 @router.get("/mjpeg")
 def video_mjpeg(key: Optional[str] = None):
-    # Require user has enabled streaming + valid key
     if not STATE.streaming_enabled:
         raise HTTPException(status_code=403, detail="Stream is off")
     if not SESSION.is_valid(key):
