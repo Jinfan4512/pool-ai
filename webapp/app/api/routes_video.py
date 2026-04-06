@@ -12,36 +12,41 @@ from app.services.stream_session import SESSION
 
 router = APIRouter(prefix="/video", tags=["video"])
 
-# Camera settings
 W = 640
 H = 480
 RES = (W, H)
 
-# Load YOLO model once when the module is imported
-# Change this path if your Raspberry Pi model folder is elsewhere
 model = YOLO("/home/poolai/YOLO/pool-ai/yolo11-pool_ncnn_model", task="detect")
 
 
 def mjpeg_generator() -> Generator[bytes, None, None]:
-    picam2 = Picamera2()
-    picam2.preview_configuration.main.size = RES
-    picam2.preview_configuration.main.format = "RGB888"
-    picam2.preview_configuration.controls.FrameRate = 60
-    picam2.preview_configuration.align()
-    picam2.configure("preview")
-    picam2.start()
-
-    boundary = b"--frame"
-
-    fps = 0.0
-    t_start = time.time()
+    picam2 = None
 
     try:
+        picam2 = Picamera2()
+        picam2.preview_configuration.main.size = RES
+        picam2.preview_configuration.main.format = "RGB888"
+        picam2.preview_configuration.controls.FrameRate = 60
+        picam2.preview_configuration.align()
+        picam2.configure("preview")
+        picam2.start()
+
+        # Let camera warm up slightly
+        time.sleep(0.2)
+
+        boundary = b"--frame"
+        fps = 0.0
+        t_start = time.time()
+
         while True:
             if not STATE.streaming_enabled:
                 break
 
             frame = picam2.capture_array()
+
+            if frame is None:
+                time.sleep(0.02)
+                continue
 
             results = model(frame, conf=0.25, verbose=False)
             annotated_frame = results[0].plot()
@@ -79,8 +84,18 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
 
     except GeneratorExit:
         pass
+    except Exception as e:
+        print(f"Video stream error: {e}")
     finally:
-        picam2.stop()
+        if picam2 is not None:
+            try:
+                picam2.stop()
+            except Exception:
+                pass
+            try:
+                picam2.close()
+            except Exception:
+                pass
 
 
 @router.get("/mjpeg")

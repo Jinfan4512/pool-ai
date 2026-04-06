@@ -86,6 +86,13 @@ async function controlStream(on) {
     return;
   }
 
+  if (!on) {
+    // Immediately clear current image stream in browser
+    streamKey = null;
+    els.liveImg.src = "";
+    els.liveImg.removeAttribute("src");
+  }
+
   const url = on ? "/api/stream/on" : "/api/stream/off";
 
   const r = await fetch(url, {
@@ -102,10 +109,14 @@ async function controlStream(on) {
 
   if (on) {
     streamKey = j.stream_key;
-    els.liveImg.src = `/video/mjpeg?key=${encodeURIComponent(streamKey)}&t=${Date.now()}`;
-  } else {
-    streamKey = null;
+
+    // Force browser to create a fresh MJPEG request
     els.liveImg.src = "";
+    els.liveImg.removeAttribute("src");
+
+    setTimeout(() => {
+      els.liveImg.src = `/video/mjpeg?key=${encodeURIComponent(streamKey)}&t=${Date.now()}`;
+    }, 100);
   }
 }
 
