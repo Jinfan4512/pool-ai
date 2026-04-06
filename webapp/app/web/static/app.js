@@ -11,6 +11,10 @@ const els = {
   btnOff: document.getElementById("btnOff"),
   liveArea: document.getElementById("liveArea"),
   liveImg: document.getElementById("liveImg"),
+  btnDetectPool: document.getElementById("btnDetectPool"),
+  btnSetBoundary: document.getElementById("btnSetBoundary"),
+  btnClearBoundary: document.getElementById("btnClearBoundary"),
+  boundaryStatus: document.getElementById("boundaryStatus"),
 };
 
 function showBanner(msg, level) {
@@ -134,8 +138,73 @@ document.addEventListener("click", (e) => {
   sim(btn.dataset.sim).then(fetchStatus);
 });
 
+async function detectPoolBoundary() {
+  const r = await fetch("/api/pool/detect", {
+    method: "POST",
+  });
+
+  const j = await r.json().catch(() => ({}));
+
+  if (!r.ok) {
+    alert(`Pool detect failed: ${r.status} ${j.detail || ""}`.trim());
+    return;
+  }
+
+  els.boundaryStatus.textContent = "detected (not confirmed)";
+  alert("Pool boundary detected. If it looks correct on the video stream, click Set Boundaries.");
+}
+
+async function confirmPoolBoundary() {
+  const r = await fetch("/api/pool/confirm", {
+    method: "POST",
+  });
+
+  const j = await r.json().catch(() => ({}));
+
+  if (!r.ok) {
+    alert(`Set Boundaries failed: ${r.status} ${j.detail || ""}`.trim());
+    return;
+  }
+
+  els.boundaryStatus.textContent = "confirmed";
+  alert("Pool boundary confirmed for this session.");
+}
+
+async function clearPoolBoundary() {
+  const r = await fetch("/api/pool/clear", {
+    method: "POST",
+  });
+
+  const j = await r.json().catch(() => ({}));
+
+  if (!r.ok) {
+    alert(`Clear boundary failed: ${r.status} ${j.detail || ""}`.trim());
+    return;
+  }
+
+  els.boundaryStatus.textContent = "not set";
+  alert("Pool boundary cleared.");
+}
+
+async function refreshPoolStatus() {
+  const r = await fetch("/api/pool/status");
+  const j = await r.json();
+
+  if (j.boundary_set) {
+    els.boundaryStatus.textContent = "confirmed";
+  } else if (j.detected_polygon) {
+    els.boundaryStatus.textContent = "detected (not confirmed)";
+  } else {
+    els.boundaryStatus.textContent = "not set";
+  }
+}
+
 els.btnOn.addEventListener("click", () => controlStream(true));
 els.btnOff.addEventListener("click", () => controlStream(false));
+els.btnDetectPool.addEventListener("click", detectPoolBoundary);
+els.btnSetBoundary.addEventListener("click", confirmPoolBoundary);
+els.btnClearBoundary.addEventListener("click", clearPoolBoundary);
 
 fetchStatus();
 connectWS();
+refreshPoolStatus();

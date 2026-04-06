@@ -6,6 +6,7 @@ from app.api.routes_sim import router as sim_router
 from app.api.routes_stream import router as stream_router
 from app.web.routes_web import router as web_router
 from app.api.routes_video import router as video_router
+from app.api.routes_pool import router as pool_router
 
 app = FastAPI(title="Wireless Pool Safety Sensor")
 
@@ -16,3 +17,4 @@ app.include_router(status_router)
 app.include_router(sim_router)
 app.include_router(stream_router)
 app.include_router(video_router)
+app.include_router(pool_router)
