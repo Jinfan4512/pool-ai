@@ -34,6 +34,21 @@
           <button id="btnOff">Disconnect</button>
         </div>
 
+      <div class="card">
+        <h2>Pool Boundary Setup</h2>
+        <div class="row">
+          <button id="btnDetectPool">Detect Pool</button>
+          <button id="btnSetBoundary">Set Boundaries</button>
+          <button id="btnClearBoundary">Clear Boundary</button>
+        </div>
+        <div class="small">
+         <span class="label">Boundary Status:</span> <span id="boundaryStatus">not set</span>
+        </div>
+        <div class="small">
+          The AI will propose the pool boundary. If correct, click <strong>Set Boundaries</strong>.
+        </div>
+      </div>
+
       <div id="liveArea" class="live hidden">
            <h3>Live Feed</h3>
            <img id="liveImg" class="liveimg" alt="Live stream" width="800"/>
