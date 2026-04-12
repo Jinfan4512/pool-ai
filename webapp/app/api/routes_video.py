@@ -26,7 +26,7 @@ RES = (W, H)
 OVERLAP_THRESHOLD = 0.20
 
 # Load YOLO model once
-model = YOLO("/home/poolai/YOLO/pool-ai/yolo11-pool_ncnn_model", task="detect")
+model = YOLO("/home/poolai/YOLO/pool-ai/yolo11-improved2_ncnn_model", task="detect")
 
 
 def mjpeg_generator() -> Generator[bytes, None, None]:
@@ -38,7 +38,7 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
         # Start Pi camera
         picam2 = Picamera2()
         picam2.preview_configuration.main.size = RES
-        picam2.preview_configuration.main.format = "RGB888"
+        picam2.preview_configuration.main.format = "BGR888"
         picam2.preview_configuration.controls.FrameRate = 60
         picam2.preview_configuration.align()
         picam2.configure("preview")
