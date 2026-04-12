@@ -1,6 +1,6 @@
 import time
 from typing import Generator, Optional
-
+from app.services.frame_store import set_latest_frame
 import cv2
 import numpy as np
 from fastapi import APIRouter, HTTPException
@@ -64,6 +64,7 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
 
             # Convert RGB -> BGR for OpenCV / YOLO plotting
             frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            set_latest_frame(frame_bgr)
 
             # Rebuild mask only if confirmed polygon changed
             if POOL_STATE.confirmed_polygon != last_confirmed_polygon:
