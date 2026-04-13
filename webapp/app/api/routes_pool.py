@@ -1,8 +1,12 @@
 from fastapi import APIRouter, HTTPException
+from datetime import datetime
+import asyncio
 
 from app.services.pool_state import POOL_STATE
 from app.services.pool_boundary import detect_pool_polygon
 from app.services.frame_store import get_latest_frame
+from app.services.state import STATE
+from app.services.event_bus import BUS
 
 router = APIRouter(prefix="/api/pool", tags=["pool"])
 
@@ -31,6 +35,20 @@ def detect_pool_boundary():
 
     POOL_STATE.detected_polygon = polygon
 
+    STATE.last_event = "Pool boundary detected by AI"
+    STATE.last_event_time = datetime.utcnow()
+
+    try:
+        asyncio.create_task(
+            BUS.broadcast({
+                "type": "pool_detected",
+                "state": STATE.__dict__,
+                "detected_polygon": polygon
+            })
+        )
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "detected_polygon": polygon
@@ -50,6 +68,22 @@ def confirm_pool_boundary():
 
     POOL_STATE.confirmed_polygon = POOL_STATE.detected_polygon
     POOL_STATE.boundary_set = True
+
+    # Update shared website status state
+    STATE.pool_boundary_set = True
+    STATE.last_event = "Pool boundary confirmed by user"
+    STATE.last_event_time = datetime.utcnow()
+
+    try:
+        asyncio.create_task(
+            BUS.broadcast({
+                "type": "pool_confirmed",
+                "state": STATE.__dict__,
+                "confirmed_polygon": POOL_STATE.confirmed_polygon
+            })
+        )
+    except Exception:
+        pass
 
     return {
         "ok": True,
@@ -77,5 +111,20 @@ def clear_pool_boundary():
     POOL_STATE.detected_polygon = None
     POOL_STATE.confirmed_polygon = None
     POOL_STATE.boundary_set = False
+
+    # Update shared website status state
+    STATE.pool_boundary_set = False
+    STATE.last_event = "Pool boundary cleared"
+    STATE.last_event_time = datetime.utcnow()
+
+    try:
+        asyncio.create_task(
+            BUS.broadcast({
+                "type": "pool_cleared",
+                "state": STATE.__dict__,
+            })
+        )
+    except Exception:
+        pass
 
     return {"ok": True}

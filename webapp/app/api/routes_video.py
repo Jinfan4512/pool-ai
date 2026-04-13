@@ -1,6 +1,8 @@
 import time
+import asyncio
+from datetime import datetime
 from typing import Generator, Optional
-from app.services.frame_store import set_latest_frame
+
 import cv2
 import numpy as np
 from fastapi import APIRouter, HTTPException
@@ -12,12 +14,14 @@ from app.services.state import STATE
 from app.services.stream_session import SESSION
 from app.services.pool_state import POOL_STATE
 from app.services.pool_boundary import create_pool_mask, compute_box_pool_overlap
+from app.services.frame_store import set_latest_frame
+from app.services.event_bus import BUS
 
 router = APIRouter(prefix="/video", tags=["video"])
 
 # Camera settings
-W = 640
-H = 480
+W = 1280
+H = 720
 RES = (W, H)
 
 # Overlap threshold:
@@ -25,7 +29,6 @@ RES = (W, H)
 # the system considers the object to be in the pool
 OVERLAP_THRESHOLD = 0.20
 
-# Load YOLO model once
 model = YOLO("/home/poolai/YOLO/pool-ai/yolo11-improved2_ncnn_model", task="detect")
 
 
@@ -38,7 +41,9 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
         # Start Pi camera
         picam2 = Picamera2()
         picam2.preview_configuration.main.size = RES
+
         picam2.preview_configuration.main.format = "BGR888"
+
         picam2.preview_configuration.controls.FrameRate = 60
         picam2.preview_configuration.align()
         picam2.configure("preview")
@@ -52,7 +57,7 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
         t_start = time.time()
 
         while True:
-            # Stop streaming quickly if user disconnects
+            # Stop quickly if user disconnects
             if not STATE.streaming_enabled:
                 break
 
@@ -62,15 +67,16 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                 time.sleep(0.02)
                 continue
 
-            # Convert RGB -> BGR for OpenCV / YOLO plotting
-            frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            set_latest_frame(frame_bgr)
+            frame_for_model = frame.copy()
+
+            # Save latest frame for pool boundary detection
+            set_latest_frame(frame_for_model)
 
             # Rebuild mask only if confirmed polygon changed
             if POOL_STATE.confirmed_polygon != last_confirmed_polygon:
                 if POOL_STATE.confirmed_polygon:
                     pool_mask = create_pool_mask(
-                        frame_bgr.shape,
+                        frame_for_model.shape,
                         POOL_STATE.confirmed_polygon
                     )
                 else:
@@ -79,7 +85,7 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                 last_confirmed_polygon = POOL_STATE.confirmed_polygon
 
             # Run YOLO detection
-            results = model(frame_bgr, conf=0.25, verbose=False)
+            results = model(frame_for_model, conf=0.25, verbose=False)
             result = results[0]
 
             # Draw YOLO boxes first
@@ -131,7 +137,6 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
             if result.boxes is not None and pool_mask is not None:
                 for box in result.boxes:
                     cls_id = int(box.cls[0].item())
-                    conf = float(box.conf[0].item())
 
                     # COCO classes:
                     # 0 = person
@@ -157,8 +162,27 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                             2
                         )
 
-            # Warning message
+            # Update website status based on overlap result
             if person_or_pet_in_pool:
+                if not STATE.object_in_pool:
+                    STATE.last_event = "Human or animal detected in pool"
+                    STATE.last_event_time = datetime.utcnow()
+
+                    try:
+                        asyncio.create_task(
+                            BUS.broadcast({
+                                "type": "pool_warning",
+                                "state": STATE.__dict__,
+                                "message": "Warning: Human or animal overlapping pool boundary."
+                            })
+                        )
+                    except Exception:
+                        pass
+
+                STATE.object_in_pool = True
+                STATE.alive_status = "alive"
+                STATE.alert_level = "warning"
+
                 cv2.putText(
                     annotated_frame,
                     "WARNING: HUMAN/ANIMAL OVERLAP WITH POOL",
@@ -168,6 +192,25 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                     (0, 0, 255),
                     3
                 )
+            else:
+                if STATE.object_in_pool:
+                    STATE.last_event = "Object exited pool"
+                    STATE.last_event_time = datetime.utcnow()
+
+                    try:
+                        asyncio.create_task(
+                            BUS.broadcast({
+                                "type": "pool_exit",
+                                "state": STATE.__dict__,
+                                "message": "Object exited pool."
+                            })
+                        )
+                    except Exception:
+                        pass
+
+                STATE.object_in_pool = False
+                STATE.alive_status = "unknown"
+                STATE.alert_level = "none"
 
             # FPS calculation
             delta_t = time.time() - t_start
@@ -185,24 +228,23 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                 2
             )
 
-            # Check again before streaming frame out
+            # Final check before sending frame
             if not STATE.streaming_enabled:
                 break
 
-            # Encode frame as JPEG
+            # Encode frame as JPEG for MJPEG stream
             ok, jpg = cv2.imencode(".jpg", annotated_frame)
             if not ok:
                 continue
 
             data = jpg.tobytes()
 
-            # Send MJPEG frame to browser
             yield boundary + b"\r\n"
             yield b"Content-Type: image/jpeg\r\n"
             yield f"Content-Length: {len(data)}\r\n\r\n".encode("utf-8")
             yield data + b"\r\n"
 
-            # Small delay to keep stream responsive
+            # Small delay keeps stream responsive
             time.sleep(0.01)
 
     except GeneratorExit:
