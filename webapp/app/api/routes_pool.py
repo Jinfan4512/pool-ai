@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException
 from datetime import datetime
-import asyncio
+
+from fastapi import APIRouter, HTTPException
 
 from app.services.pool_state import POOL_STATE
 from app.services.pool_boundary import detect_pool_polygon
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/pool", tags=["pool"])
 
 
 @router.post("/detect")
-def detect_pool_boundary():
+async def detect_pool_boundary():
     """
     Detect the pool boundary from the latest frame already captured
     by the live video stream.
@@ -38,16 +38,11 @@ def detect_pool_boundary():
     STATE.last_event = "Pool boundary detected by AI"
     STATE.last_event_time = datetime.utcnow()
 
-    try:
-        asyncio.create_task(
-            BUS.broadcast({
-                "type": "pool_detected",
-                "state": STATE.__dict__,
-                "detected_polygon": polygon
-            })
-        )
-    except Exception:
-        pass
+    await BUS.broadcast({
+        "type": "pool_detected",
+        "state": STATE.__dict__,
+        "detected_polygon": polygon
+    })
 
     return {
         "ok": True,
@@ -56,7 +51,7 @@ def detect_pool_boundary():
 
 
 @router.post("/confirm")
-def confirm_pool_boundary():
+async def confirm_pool_boundary():
     """
     Confirm the most recently detected pool boundary for this server session.
     """
@@ -69,21 +64,15 @@ def confirm_pool_boundary():
     POOL_STATE.confirmed_polygon = POOL_STATE.detected_polygon
     POOL_STATE.boundary_set = True
 
-    # Update shared website status state
     STATE.pool_boundary_set = True
     STATE.last_event = "Pool boundary confirmed by user"
     STATE.last_event_time = datetime.utcnow()
 
-    try:
-        asyncio.create_task(
-            BUS.broadcast({
-                "type": "pool_confirmed",
-                "state": STATE.__dict__,
-                "confirmed_polygon": POOL_STATE.confirmed_polygon
-            })
-        )
-    except Exception:
-        pass
+    await BUS.broadcast({
+        "type": "pool_confirmed",
+        "state": STATE.__dict__,
+        "confirmed_polygon": POOL_STATE.confirmed_polygon
+    })
 
     return {
         "ok": True,
@@ -92,7 +81,7 @@ def confirm_pool_boundary():
 
 
 @router.get("/status")
-def pool_status():
+async def pool_status():
     """
     Return current pool boundary state.
     """
@@ -104,7 +93,7 @@ def pool_status():
 
 
 @router.post("/clear")
-def clear_pool_boundary():
+async def clear_pool_boundary():
     """
     Clear detected and confirmed pool boundaries for this session.
     """
@@ -112,19 +101,13 @@ def clear_pool_boundary():
     POOL_STATE.confirmed_polygon = None
     POOL_STATE.boundary_set = False
 
-    # Update shared website status state
     STATE.pool_boundary_set = False
     STATE.last_event = "Pool boundary cleared"
     STATE.last_event_time = datetime.utcnow()
 
-    try:
-        asyncio.create_task(
-            BUS.broadcast({
-                "type": "pool_cleared",
-                "state": STATE.__dict__,
-            })
-        )
-    except Exception:
-        pass
+    await BUS.broadcast({
+        "type": "pool_cleared",
+        "state": STATE.__dict__,
+    })
 
     return {"ok": True}

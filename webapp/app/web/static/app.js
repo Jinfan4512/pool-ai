@@ -206,5 +206,9 @@ els.btnSetBoundary.addEventListener("click", confirmPoolBoundary);
 els.btnClearBoundary.addEventListener("click", clearPoolBoundary);
 
 fetchStatus();
-connectWS();
 refreshPoolStatus();
+connectWS();
+
+// Safety polling so status stays correct even if a WebSocket event is missed
+setInterval(fetchStatus, 1000);
+setInterval(refreshPoolStatus, 1000);
