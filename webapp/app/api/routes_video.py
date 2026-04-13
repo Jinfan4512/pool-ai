@@ -42,7 +42,7 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
         picam2 = Picamera2()
         picam2.preview_configuration.main.size = RES
 
-        picam2.preview_configuration.main.format = "BGR888"
+        picam2.preview_configuration.main.format = "RGB888"
 
         picam2.preview_configuration.controls.FrameRate = 60
         picam2.preview_configuration.align()
