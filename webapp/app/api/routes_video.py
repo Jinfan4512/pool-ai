@@ -1,5 +1,4 @@
 import time
-import asyncio
 from datetime import datetime
 from typing import Generator, Optional
 
@@ -15,7 +14,6 @@ from app.services.stream_session import SESSION
 from app.services.pool_state import POOL_STATE
 from app.services.pool_boundary import create_pool_mask, compute_box_pool_overlap
 from app.services.frame_store import set_latest_frame
-from app.services.event_bus import BUS
 
 router = APIRouter(prefix="/video", tags=["video"])
 
@@ -24,11 +22,10 @@ W = 1280
 H = 720
 RES = (W, H)
 
-# Overlap threshold:
-# if overlap between person/pet box and pool mask is above this,
-# the system considers the object to be in the pool
+# Adjust if needed
 OVERLAP_THRESHOLD = 0.20
 
+# Keep your teammate's model path
 model = YOLO("/home/poolai/YOLO/pool-ai/yolo11-improved2_ncnn_model", task="detect")
 
 
@@ -36,20 +33,17 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
     picam2 = None
     pool_mask = None
     last_confirmed_polygon = None
+    prev_in_pool = False
 
     try:
-        # Start Pi camera
         picam2 = Picamera2()
         picam2.preview_configuration.main.size = RES
-
         picam2.preview_configuration.main.format = "RGB888"
-
         picam2.preview_configuration.controls.FrameRate = 60
         picam2.preview_configuration.align()
         picam2.configure("preview")
         picam2.start()
 
-        # Small warm-up delay
         time.sleep(0.2)
 
         boundary = b"--frame"
@@ -57,22 +51,21 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
         t_start = time.time()
 
         while True:
-            # Stop quickly if user disconnects
             if not STATE.streaming_enabled:
                 break
 
-            # Capture one frame from Pi camera
             frame = picam2.capture_array()
             if frame is None:
                 time.sleep(0.02)
                 continue
 
+            # Keep teammate's color handling
             frame_for_model = frame.copy()
 
-            # Save latest frame for pool boundary detection
+            # Save latest frame for pool detection
             set_latest_frame(frame_for_model)
 
-            # Rebuild mask only if confirmed polygon changed
+            # Rebuild pool mask only if confirmed polygon changed
             if POOL_STATE.confirmed_polygon != last_confirmed_polygon:
                 if POOL_STATE.confirmed_polygon:
                     pool_mask = create_pool_mask(
@@ -84,21 +77,19 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
 
                 last_confirmed_polygon = POOL_STATE.confirmed_polygon
 
-            # Run YOLO detection
+            # Run YOLO
             results = model(frame_for_model, conf=0.25, verbose=False)
             result = results[0]
-
-            # Draw YOLO boxes first
             annotated_frame = result.plot()
 
-            # Draw detected pool boundary (yellow) if available but not confirmed
+            # Draw detected pool boundary (yellow) if not confirmed yet
             if POOL_STATE.detected_polygon and not POOL_STATE.boundary_set:
                 pts = np.array(POOL_STATE.detected_polygon, dtype=np.int32)
                 cv2.polylines(
                     annotated_frame,
                     [pts],
                     isClosed=True,
-                    color=(0, 255, 255),   # yellow
+                    color=(0, 255, 255),
                     thickness=2
                 )
                 cv2.putText(
@@ -118,7 +109,7 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                     annotated_frame,
                     [pts],
                     isClosed=True,
-                    color=(255, 0, 0),   # blue
+                    color=(255, 0, 0),
                     thickness=3
                 )
                 cv2.putText(
@@ -131,8 +122,11 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                     2
                 )
 
+            # -----------------------------
             # Overlap detection
-            person_or_pet_in_pool = False
+            # -----------------------------
+            max_overlap = 0.0
+            in_pool_now = False
 
             if result.boxes is not None and pool_mask is not None:
                 for box in result.boxes:
@@ -148,40 +142,36 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                     x1, y1, x2, y2 = box.xyxy[0].tolist()
                     overlap = compute_box_pool_overlap(pool_mask, (x1, y1, x2, y2))
 
-                    if overlap >= OVERLAP_THRESHOLD:
-                        person_or_pet_in_pool = True
+                    if overlap > max_overlap:
+                        max_overlap = overlap
 
-                        label_text = f"In Pool ({overlap:.2f})"
-                        cv2.putText(
-                            annotated_frame,
-                            label_text,
-                            (int(x1), max(20, int(y1) - 10)),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.8,
-                            (0, 0, 255),
-                            2
-                        )
+                    # Draw overlap text near each valid tracked object
+                    cv2.putText(
+                        annotated_frame,
+                        f"Pool {overlap:.2f}",
+                        (int(x1), min(H - 20, int(y2) + 25)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        (0, 255, 255),
+                        2
+                    )
 
-            # Update website status based on overlap result
-            if person_or_pet_in_pool:
-                if not STATE.object_in_pool:
-                    STATE.last_event = "Human or animal detected in pool"
-                    STATE.last_event_time = datetime.utcnow()
+            if max_overlap >= OVERLAP_THRESHOLD:
+                in_pool_now = True
 
-                    try:
-                        asyncio.create_task(
-                            BUS.broadcast({
-                                "type": "pool_warning",
-                                "state": STATE.__dict__,
-                                "message": "Warning: Human or animal overlapping pool boundary."
-                            })
-                        )
-                    except Exception:
-                        pass
+            # -----------------------------
+            # Update website state
+            # -----------------------------
+            STATE.pool_boundary_set = POOL_STATE.boundary_set
 
+            if in_pool_now:
                 STATE.object_in_pool = True
                 STATE.alive_status = "alive"
                 STATE.alert_level = "warning"
+
+                if not prev_in_pool:
+                    STATE.last_event = "Human or animal detected in pool"
+                    STATE.last_event_time = datetime.utcnow()
 
                 cv2.putText(
                     annotated_frame,
@@ -193,26 +183,19 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                     3
                 )
             else:
-                if STATE.object_in_pool:
-                    STATE.last_event = "Object exited pool"
-                    STATE.last_event_time = datetime.utcnow()
-
-                    try:
-                        asyncio.create_task(
-                            BUS.broadcast({
-                                "type": "pool_exit",
-                                "state": STATE.__dict__,
-                                "message": "Object exited pool."
-                            })
-                        )
-                    except Exception:
-                        pass
-
                 STATE.object_in_pool = False
                 STATE.alive_status = "unknown"
                 STATE.alert_level = "none"
 
-            # FPS calculation
+                if prev_in_pool:
+                    STATE.last_event = "Object exited pool"
+                    STATE.last_event_time = datetime.utcnow()
+
+            prev_in_pool = in_pool_now
+
+            # -----------------------------
+            # FPS
+            # -----------------------------
             delta_t = time.time() - t_start
             t_start = time.time()
             if delta_t > 0:
@@ -228,11 +211,9 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                 2
             )
 
-            # Final check before sending frame
             if not STATE.streaming_enabled:
                 break
 
-            # Encode frame as JPEG for MJPEG stream
             ok, jpg = cv2.imencode(".jpg", annotated_frame)
             if not ok:
                 continue
@@ -244,11 +225,9 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
             yield f"Content-Length: {len(data)}\r\n\r\n".encode("utf-8")
             yield data + b"\r\n"
 
-            # Small delay keeps stream responsive
             time.sleep(0.01)
 
     except GeneratorExit:
-        # Browser closed connection
         pass
     except Exception as e:
         print(f"Video stream error: {e}")
