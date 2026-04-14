@@ -5,27 +5,42 @@ from typing import List, Tuple, Optional
 Point = Tuple[int, int]
 
 
+def sanitize_polygon(points: List[Point]) -> Optional[List[Point]]:
+    """
+    Turn an arbitrary point list into a valid simple polygon using convex hull.
+    This avoids self-crossing shapes that break mask filling.
+    """
+    if not points or len(points) < 3:
+        return None
+
+    pts = np.array(points, dtype=np.int32)
+
+    # Convex hull returns a clean outer boundary
+    hull = cv2.convexHull(pts)
+    hull_points = [(int(p[0][0]), int(p[0][1])) for p in hull]
+
+    if len(hull_points) < 3:
+        return None
+
+    return hull_points
+
+
 def detect_pool_polygon(frame) -> Optional[List[Point]]:
     """
-    Simple prototype pool detector.
-    This uses color/edge/contour logic to guess the pool boundary.
-
-    For now, it returns the largest 4-point contour approximation.
-    You can improve this later.
+    Prototype pool detector using color + contour.
+    Returns a sanitized polygon.
     """
     img = frame.copy()
     h, w = img.shape[:2]
 
-    # Convert to HSV to try to isolate blue-ish water region
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-    # Broad blue range; tune later for your pool
+    # Broad blue range; tune later if needed
     lower_blue = np.array([80, 30, 30])
     upper_blue = np.array([140, 255, 255])
 
     mask = cv2.inRange(hsv, lower_blue, upper_blue)
 
-    # Clean mask
     kernel = np.ones((7, 7), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
@@ -37,28 +52,36 @@ def detect_pool_polygon(frame) -> Optional[List[Point]]:
 
     largest = max(contours, key=cv2.contourArea)
 
-    # Ignore tiny detections
     if cv2.contourArea(largest) < 0.05 * (w * h):
         return None
 
     peri = cv2.arcLength(largest, True)
     approx = cv2.approxPolyDP(largest, 0.02 * peri, True)
 
-    # If approx has too few points, fallback to bounding rect
     if len(approx) < 4:
         x, y, bw, bh = cv2.boundingRect(largest)
-        return [(x, y), (x + bw, y), (x + bw, y + bh), (x, y + bh)]
+        raw_polygon = [(x, y), (x + bw, y), (x + bw, y + bh), (x, y + bh)]
+    else:
+        raw_polygon = [(int(pt[0][0]), int(pt[0][1])) for pt in approx]
 
-    polygon = [(int(pt[0][0]), int(pt[0][1])) for pt in approx]
-
-    return polygon
+    return sanitize_polygon(raw_polygon)
 
 
 def create_pool_mask(frame_shape, polygon_points: List[Point]):
+    """
+    Create a binary mask from a sanitized pool polygon.
+    """
+    polygon_points = sanitize_polygon(polygon_points)
+    if polygon_points is None:
+        h, w = frame_shape[:2]
+        return np.zeros((h, w), dtype=np.uint8)
+
     h, w = frame_shape[:2]
     mask = np.zeros((h, w), dtype=np.uint8)
+
     pts = np.array(polygon_points, dtype=np.int32)
     cv2.fillPoly(mask, [pts], 255)
+
     return mask
 
 

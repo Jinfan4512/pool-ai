@@ -1,21 +1,17 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Literal
+from typing import Optional
 
-AlertLevel = Literal["none", "info", "warning", "critical"]
 
 @dataclass
-class SystemState:
+class AppState:
     pool_boundary_set: bool = False
     object_in_pool: bool = False
-    last_event: str = "System boot"
-    last_event_time: datetime = field(default_factory=datetime.utcnow)
-
-    # Alive / distress logic placeholder
-    alive_status: Optional[Literal["unknown", "alive", "distress"]] = "unknown"
-    alert_level: AlertLevel = "none"
-
-    # Stream control (only user can toggle)
+    alive_status: str = "unknown"
     streaming_enabled: bool = False
+    alert_level: str = "none"
+    last_event: str = "System initialized"
+    last_event_time: Optional[datetime] = None
 
-STATE = SystemState()
+
+STATE = AppState()

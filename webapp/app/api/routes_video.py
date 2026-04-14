@@ -22,10 +22,10 @@ W = 1280
 H = 720
 RES = (W, H)
 
-# Adjust if needed
+# Lower threshold for testing
 OVERLAP_THRESHOLD = 0.10
 
-# Keep your teammate's model path
+# Teammate's model path
 model = YOLO("/home/poolai/YOLO/pool-ai/yolo11-improved2_ncnn_model", task="detect")
 
 
@@ -59,13 +59,13 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                 time.sleep(0.02)
                 continue
 
-            # Keep teammate's color handling
+            # Keep teammate's color handling: do not add extra RGB/BGR conversion here
             frame_for_model = frame.copy()
 
-            # Save latest frame for pool detection
+            # Save latest frame for pool detection route
             set_latest_frame(frame_for_model)
 
-            # Rebuild pool mask only if confirmed polygon changed
+            # Rebuild mask if confirmed polygon changed
             if POOL_STATE.confirmed_polygon != last_confirmed_polygon:
                 if POOL_STATE.confirmed_polygon:
                     pool_mask = create_pool_mask(
@@ -82,7 +82,7 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
             result = results[0]
             annotated_frame = result.plot()
 
-            # Draw detected pool boundary (yellow) if not confirmed yet
+            # Draw detected pool boundary (yellow) if not confirmed
             if POOL_STATE.detected_polygon and not POOL_STATE.boundary_set:
                 pts = np.array(POOL_STATE.detected_polygon, dtype=np.int32)
                 cv2.polylines(
@@ -125,9 +125,6 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
             # -----------------------------
             # Overlap detection
             # -----------------------------
-                        # -----------------------------
-            # Overlap detection
-            # -----------------------------
             max_overlap = 0.0
 
             if result.boxes is not None and pool_mask is not None:
@@ -147,7 +144,7 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                     if overlap > max_overlap:
                         max_overlap = overlap
 
-                    # Draw overlap text near each valid tracked object
+                    # Show overlap number near each tracked object
                     cv2.putText(
                         annotated_frame,
                         f"Pool {overlap:.2f}",
@@ -158,10 +155,10 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                         2
                     )
 
-            # Decide whether something is in pool
+            # Final in-pool decision
             in_pool_now = max_overlap >= OVERLAP_THRESHOLD
 
-            # DEBUG print to terminal
+            # Debug print in terminal
             print(
                 f"DEBUG overlap={max_overlap:.2f}, "
                 f"threshold={OVERLAP_THRESHOLD:.2f}, "
@@ -169,19 +166,24 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
             )
 
             # -----------------------------
-            # Update website state
+            # Update shared status state
             # -----------------------------
             STATE.pool_boundary_set = POOL_STATE.boundary_set
             STATE.object_in_pool = in_pool_now
+            STATE.alive_status = "alive" if in_pool_now else "unknown"
+            STATE.alert_level = "warning" if in_pool_now else "none"
+
+            if in_pool_now and not prev_in_pool:
+                STATE.last_event = "Human or animal detected in pool"
+                STATE.last_event_time = datetime.utcnow()
+
+            if not in_pool_now and prev_in_pool:
+                STATE.last_event = "Object exited pool"
+                STATE.last_event_time = datetime.utcnow()
+
+            prev_in_pool = in_pool_now
 
             if in_pool_now:
-                STATE.alive_status = "alive"
-                STATE.alert_level = "warning"
-
-                if not prev_in_pool:
-                    STATE.last_event = "Human or animal detected in pool"
-                    STATE.last_event_time = datetime.utcnow()
-
                 cv2.putText(
                     annotated_frame,
                     "WARNING: HUMAN/ANIMAL OVERLAP WITH POOL",
@@ -191,15 +193,6 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                     (0, 0, 255),
                     3
                 )
-            else:
-                STATE.alive_status = "unknown"
-                STATE.alert_level = "none"
-
-                if prev_in_pool:
-                    STATE.last_event = "Object exited pool"
-                    STATE.last_event_time = datetime.utcnow()
-
-            prev_in_pool = in_pool_now
 
             # -----------------------------
             # FPS

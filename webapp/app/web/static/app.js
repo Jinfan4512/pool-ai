@@ -31,29 +31,16 @@ function hideBanner() {
 }
 
 function renderState(state) {
-  els.boundary.textContent = state.pool_boundary_set ? "set" : "not set";
-  els.inpool.textContent = state.object_in_pool ? "YES" : "no";
-  els.alive.textContent = state.alive_status ?? "unknown";
-  els.stream.textContent = state.streaming_enabled ? "ON" : "off";
-  els.lastevent.textContent = state.last_event;
-  els.lasttime.textContent = state.last_event_time;
+  if (!state) return;
 
-  if (state.object_in_pool) {
-    if (state.alert_level === "critical") {
-      showBanner("CRITICAL: Possible drowning risk. View live feed now?", "critical");
-    } else {
-      showBanner("Alert: Object entered pool. View live feed?", "warning");
-    }
-  } else {
-    if (state.streaming_enabled) {
-      showBanner("Object exited pool. Disconnect live feed?", "info");
-    } else {
-      hideBanner();
-    }
-  }
+  els.boundary.textContent = state.boundary_set ? "set" : "not set";
+  els.inPool.textContent = state.in_pool ? "yes" : "no";
+  els.alive.textContent = state.alive || "unknown";
+  els.stream.textContent = state.stream_on ? "ON" : "OFF";
 
-  if (state.streaming_enabled) els.liveArea.classList.remove("hidden");
-  else els.liveArea.classList.add("hidden");
+  const lastEvent = state.last_event || "none";
+  const lastTime = state.last_event_time ? ` Time: ${state.last_event_time}` : "";
+  els.lastEvent.textContent = `${lastEvent}${lastTime}`;
 }
 
 async function fetchStatus() {

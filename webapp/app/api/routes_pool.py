@@ -2,6 +2,8 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 
+from app.services.pool_boundary import detect_pool_polygon, sanitize_polygon
+
 from app.services.pool_state import POOL_STATE
 from app.services.pool_boundary import detect_pool_polygon
 from app.services.frame_store import get_latest_frame
@@ -61,7 +63,14 @@ async def confirm_pool_boundary():
             detail="No detected pool boundary available"
         )
 
-    POOL_STATE.confirmed_polygon = POOL_STATE.detected_polygon
+    clean_polygon = sanitize_polygon(POOL_STATE.detected_polygon)
+    if clean_polygon is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Detected pool boundary is invalid"
+    )
+
+    POOL_STATE.confirmed_polygon = clean_polygon
     POOL_STATE.boundary_set = True
 
     STATE.pool_boundary_set = True
