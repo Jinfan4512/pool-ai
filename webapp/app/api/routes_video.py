@@ -23,7 +23,7 @@ H = 720
 RES = (W, H)
 
 # Adjust if needed
-OVERLAP_THRESHOLD = 0.20
+OVERLAP_THRESHOLD = 0.10
 
 # Keep your teammate's model path
 model = YOLO("/home/poolai/YOLO/pool-ai/yolo11-improved2_ncnn_model", task="detect")
@@ -125,8 +125,10 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
             # -----------------------------
             # Overlap detection
             # -----------------------------
+                        # -----------------------------
+            # Overlap detection
+            # -----------------------------
             max_overlap = 0.0
-            in_pool_now = False
 
             if result.boxes is not None and pool_mask is not None:
                 for box in result.boxes:
@@ -156,16 +158,23 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                         2
                     )
 
-            if max_overlap >= OVERLAP_THRESHOLD:
-                in_pool_now = True
+            # Decide whether something is in pool
+            in_pool_now = max_overlap >= OVERLAP_THRESHOLD
+
+            # DEBUG print to terminal
+            print(
+                f"DEBUG overlap={max_overlap:.2f}, "
+                f"threshold={OVERLAP_THRESHOLD:.2f}, "
+                f"in_pool_now={in_pool_now}"
+            )
 
             # -----------------------------
             # Update website state
             # -----------------------------
             STATE.pool_boundary_set = POOL_STATE.boundary_set
+            STATE.object_in_pool = in_pool_now
 
             if in_pool_now:
-                STATE.object_in_pool = True
                 STATE.alive_status = "alive"
                 STATE.alert_level = "warning"
 
@@ -183,7 +192,6 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                     3
                 )
             else:
-                STATE.object_in_pool = False
                 STATE.alive_status = "unknown"
                 STATE.alert_level = "none"
 
