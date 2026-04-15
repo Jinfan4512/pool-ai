@@ -8,14 +8,11 @@ Point = Tuple[int, int]
 def sanitize_polygon(points: List[Point]) -> Optional[List[Point]]:
     """
     Turn an arbitrary point list into a valid simple polygon using convex hull.
-    This avoids self-crossing shapes that break mask filling.
     """
     if not points or len(points) < 3:
         return None
 
     pts = np.array(points, dtype=np.int32)
-
-    # Convex hull returns a clean outer boundary
     hull = cv2.convexHull(pts)
     hull_points = [(int(p[0][0]), int(p[0][1])) for p in hull]
 
@@ -27,15 +24,14 @@ def sanitize_polygon(points: List[Point]) -> Optional[List[Point]]:
 
 def detect_pool_polygon(frame) -> Optional[List[Point]]:
     """
-    Prototype pool detector using color + contour.
-    Returns a sanitized polygon.
+    Detect pool boundary from the latest RGB frame.
     """
     img = frame.copy()
     h, w = img.shape[:2]
 
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    # FIX: latest frame is RGB, not BGR
+    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
 
-    # Broad blue range; tune later if needed
     lower_blue = np.array([80, 30, 30])
     upper_blue = np.array([140, 255, 255])
 
@@ -68,9 +64,6 @@ def detect_pool_polygon(frame) -> Optional[List[Point]]:
 
 
 def create_pool_mask(frame_shape, polygon_points: List[Point]):
-    """
-    Create a binary mask from a sanitized pool polygon.
-    """
     polygon_points = sanitize_polygon(polygon_points)
     if polygon_points is None:
         h, w = frame_shape[:2]
@@ -110,3 +103,21 @@ def compute_box_pool_overlap(mask, box):
         return 0.0
 
     return pool_pixels / box_area
+
+
+def box_center_in_polygon(polygon_points: List[Point], box) -> bool:
+    """
+    Return True if the center of the box is inside the polygon.
+    """
+    polygon_points = sanitize_polygon(polygon_points)
+    if polygon_points is None:
+        return False
+
+    x1, y1, x2, y2 = box
+    cx = (float(x1) + float(x2)) / 2.0
+    cy = (float(y1) + float(y2)) / 2.0
+
+    pts = np.array(polygon_points, dtype=np.int32)
+    result = cv2.pointPolygonTest(pts, (cx, cy), False)
+
+    return result >= 0

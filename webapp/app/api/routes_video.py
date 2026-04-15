@@ -12,20 +12,21 @@ from ultralytics import YOLO
 from app.services.state import STATE
 from app.services.stream_session import SESSION
 from app.services.pool_state import POOL_STATE
-from app.services.pool_boundary import create_pool_mask, compute_box_pool_overlap
+from app.services.pool_boundary import (
+    create_pool_mask,
+    compute_box_pool_overlap,
+    box_center_in_polygon,
+)
 from app.services.frame_store import set_latest_frame
 
 router = APIRouter(prefix="/video", tags=["video"])
 
-# Camera settings
 W = 1280
 H = 720
 RES = (W, H)
 
-# Lower threshold for testing
 OVERLAP_THRESHOLD = 0.10
 
-# Teammate's model path
 model = YOLO("/home/poolai/YOLO/pool-ai/yolo11-improved2_ncnn_model", task="detect")
 
 
@@ -59,13 +60,9 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                 time.sleep(0.02)
                 continue
 
-            # Keep teammate's color handling: do not add extra RGB/BGR conversion here
             frame_for_model = frame.copy()
-
-            # Save latest frame for pool detection route
             set_latest_frame(frame_for_model)
 
-            # Rebuild mask if confirmed polygon changed
             if POOL_STATE.confirmed_polygon != last_confirmed_polygon:
                 if POOL_STATE.confirmed_polygon:
                     pool_mask = create_pool_mask(
@@ -77,12 +74,10 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
 
                 last_confirmed_polygon = POOL_STATE.confirmed_polygon
 
-            # Run YOLO
             results = model(frame_for_model, conf=0.25, verbose=False)
             result = results[0]
             annotated_frame = result.plot()
 
-            # Draw detected pool boundary (yellow) if not confirmed
             if POOL_STATE.detected_polygon and not POOL_STATE.boundary_set:
                 pts = np.array(POOL_STATE.detected_polygon, dtype=np.int32)
                 cv2.polylines(
@@ -102,7 +97,6 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                     2
                 )
 
-            # Draw confirmed pool boundary (blue)
             if POOL_STATE.confirmed_polygon and POOL_STATE.boundary_set:
                 pts = np.array(POOL_STATE.confirmed_polygon, dtype=np.int32)
                 cv2.polylines(
@@ -123,28 +117,32 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                 )
 
             # -----------------------------
-            # Overlap detection
+            # Overlap / inside-polygon detection
             # -----------------------------
             max_overlap = 0.0
+            in_pool_now = False
 
-            if result.boxes is not None and pool_mask is not None:
+            if result.boxes is not None and POOL_STATE.confirmed_polygon is not None:
                 for box in result.boxes:
                     cls_id = int(box.cls[0].item())
 
-                    # COCO classes:
-                    # 0 = person
-                    # 15 = cat
-                    # 16 = dog
                     if cls_id not in [0, 15, 16]:
                         continue
 
                     x1, y1, x2, y2 = box.xyxy[0].tolist()
-                    overlap = compute_box_pool_overlap(pool_mask, (x1, y1, x2, y2))
+
+                    overlap = 0.0
+                    if pool_mask is not None:
+                        overlap = compute_box_pool_overlap(pool_mask, (x1, y1, x2, y2))
+
+                    center_inside = box_center_in_polygon(
+                        POOL_STATE.confirmed_polygon,
+                        (x1, y1, x2, y2)
+                    )
 
                     if overlap > max_overlap:
                         max_overlap = overlap
 
-                    # Show overlap number near each tracked object
                     cv2.putText(
                         annotated_frame,
                         f"Pool {overlap:.2f}",
@@ -155,19 +153,27 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                         2
                     )
 
-            # Final in-pool decision
-            in_pool_now = max_overlap >= OVERLAP_THRESHOLD
+                    if center_inside:
+                        cv2.putText(
+                            annotated_frame,
+                            "CENTER INSIDE",
+                            (int(x1), max(20, int(y1) - 10)),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.7,
+                            (0, 255, 0),
+                            2
+                        )
 
-            # Debug print in terminal
+                    # Trigger if either test passes
+                    if center_inside or overlap >= OVERLAP_THRESHOLD:
+                        in_pool_now = True
+
             print(
                 f"DEBUG overlap={max_overlap:.2f}, "
                 f"threshold={OVERLAP_THRESHOLD:.2f}, "
                 f"in_pool_now={in_pool_now}"
             )
 
-            # -----------------------------
-            # Update shared status state
-            # -----------------------------
             STATE.pool_boundary_set = POOL_STATE.boundary_set
             STATE.object_in_pool = in_pool_now
             STATE.alive_status = "alive" if in_pool_now else "unknown"
@@ -194,9 +200,6 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                     3
                 )
 
-            # -----------------------------
-            # FPS
-            # -----------------------------
             delta_t = time.time() - t_start
             t_start = time.time()
             if delta_t > 0:
