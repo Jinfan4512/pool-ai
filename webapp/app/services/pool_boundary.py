@@ -24,15 +24,20 @@ def sanitize_polygon(points: List[Point]) -> Optional[List[Point]]:
 
 def detect_pool_polygon(frame) -> Optional[List[Point]]:
     """
-    Detect pool boundary from the latest RGB frame.
+    Stricter prototype pool detector.
+
+    Important behavior:
+    - returns None if confidence is low
+    - does NOT guess using a bounding rectangle fallback
     """
     img = frame.copy()
     h, w = img.shape[:2]
 
-    # FIX: latest frame is RGB, not BGR
+    # Latest frame from Picamera2 is RGB
     hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
 
-    lower_blue = np.array([80, 30, 30])
+    # Tune this later if needed
+    lower_blue = np.array([80, 40, 40])
     upper_blue = np.array([140, 255, 255])
 
     mask = cv2.inRange(hsv, lower_blue, upper_blue)
@@ -47,20 +52,38 @@ def detect_pool_polygon(frame) -> Optional[List[Point]]:
         return None
 
     largest = max(contours, key=cv2.contourArea)
+    area = cv2.contourArea(largest)
 
-    if cv2.contourArea(largest) < 0.05 * (w * h):
+    # Require a reasonably large region
+    min_area = 0.08 * (w * h)
+    if area < min_area:
+        return None
+
+    x, y, bw, bh = cv2.boundingRect(largest)
+
+    # Reject tiny or skinny regions
+    if bw < 0.2 * w or bh < 0.15 * h:
+        return None
+
+    # Reject regions too high in the frame
+    # Pools in your setup should usually be lower / centered, not near the very top
+    if y < 0.10 * h:
         return None
 
     peri = cv2.arcLength(largest, True)
     approx = cv2.approxPolyDP(largest, 0.02 * peri, True)
 
-    if len(approx) < 4:
-        x, y, bw, bh = cv2.boundingRect(largest)
-        raw_polygon = [(x, y), (x + bw, y), (x + bw, y + bh), (x, y + bh)]
-    else:
-        raw_polygon = [(int(pt[0][0]), int(pt[0][1])) for pt in approx]
+    # Require a decent polygon, not a random blob
+    if len(approx) < 4 or len(approx) > 12:
+        return None
 
-    return sanitize_polygon(raw_polygon)
+    raw_polygon = [(int(pt[0][0]), int(pt[0][1])) for pt in approx]
+    polygon = sanitize_polygon(raw_polygon)
+
+    if polygon is None or len(polygon) < 4:
+        return None
+
+    return polygon
 
 
 def create_pool_mask(frame_shape, polygon_points: List[Point]):
@@ -79,9 +102,6 @@ def create_pool_mask(frame_shape, polygon_points: List[Point]):
 
 
 def compute_box_pool_overlap(mask, box):
-    """
-    overlap_ratio = pool pixels inside box / box area
-    """
     x1, y1, x2, y2 = box
 
     x1 = max(0, int(x1))
@@ -106,9 +126,6 @@ def compute_box_pool_overlap(mask, box):
 
 
 def box_center_in_polygon(polygon_points: List[Point], box) -> bool:
-    """
-    Return True if the center of the box is inside the polygon.
-    """
     polygon_points = sanitize_polygon(polygon_points)
     if polygon_points is None:
         return False
