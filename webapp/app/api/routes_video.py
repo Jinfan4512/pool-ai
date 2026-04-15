@@ -29,6 +29,12 @@ OVERLAP_THRESHOLD = 0.10
 
 model = YOLO("/home/poolai/YOLO/pool-ai/yolo11-improved2_ncnn_model", task="detect")
 
+# Custom model class IDs
+CAT_CLASS_ID = 0
+DOG_CLASS_ID = 1
+PERSON_CLASS_ID = 2
+POOL_CLASS_ID = 3
+
 
 def mjpeg_generator() -> Generator[bytes, None, None]:
     picam2 = None
@@ -78,6 +84,7 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
             result = results[0]
             annotated_frame = result.plot()
 
+            # Draw detected pool boundary (yellow) if not confirmed
             if POOL_STATE.detected_polygon and not POOL_STATE.boundary_set:
                 pts = np.array(POOL_STATE.detected_polygon, dtype=np.int32)
                 cv2.polylines(
@@ -97,6 +104,7 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                     2
                 )
 
+            # Draw confirmed pool boundary (blue)
             if POOL_STATE.confirmed_polygon and POOL_STATE.boundary_set:
                 pts = np.array(POOL_STATE.confirmed_polygon, dtype=np.int32)
                 cv2.polylines(
@@ -117,7 +125,7 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                 )
 
             # -----------------------------
-            # Overlap / inside-polygon detection
+            # Person / animal in-pool detection
             # -----------------------------
             max_overlap = 0.0
             in_pool_now = False
@@ -126,7 +134,8 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                 for box in result.boxes:
                     cls_id = int(box.cls[0].item())
 
-                    if cls_id not in [0, 15, 16]:
+                    # Only track cat, dog, person for alerts
+                    if cls_id not in [CAT_CLASS_ID, DOG_CLASS_ID, PERSON_CLASS_ID]:
                         continue
 
                     x1, y1, x2, y2 = box.xyxy[0].tolist()
@@ -145,7 +154,7 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
 
                     cv2.putText(
                         annotated_frame,
-                        f"Pool {overlap:.2f}",
+                        f"Overlap {overlap:.2f}",
                         (int(x1), min(H - 20, int(y2) + 25)),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.7,
@@ -164,7 +173,6 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
                             2
                         )
 
-                    # Trigger if either test passes
                     if center_inside or overlap >= OVERLAP_THRESHOLD:
                         in_pool_now = True
 

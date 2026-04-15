@@ -1,14 +1,18 @@
 import cv2
 import numpy as np
 from typing import List, Tuple, Optional
+from ultralytics import YOLO
 
 Point = Tuple[int, int]
 
+# Load model once here for pool-boundary proposal
+model = YOLO("/home/poolai/YOLO/pool-ai/yolo11-improved2_ncnn_model", task="detect")
+
+# CHANGE THIS after you print model.names
+POOL_CLASS_ID = 3
+
 
 def sanitize_polygon(points: List[Point]) -> Optional[List[Point]]:
-    """
-    Turn an arbitrary point list into a valid simple polygon using convex hull.
-    """
     if not points or len(points) < 3:
         return None
 
@@ -24,66 +28,42 @@ def sanitize_polygon(points: List[Point]) -> Optional[List[Point]]:
 
 def detect_pool_polygon(frame) -> Optional[List[Point]]:
     """
-    Stricter prototype pool detector.
-
-    Important behavior:
-    - returns None if confidence is low
-    - does NOT guess using a bounding rectangle fallback
+    Detect pool boundary using YOLO pool box, not HSV blue thresholding.
+    Returns a rectangle polygon from the best detected pool box.
     """
-    img = frame.copy()
-    h, w = img.shape[:2]
+    results = model(frame, conf=0.25, verbose=False)
+    result = results[0]
 
-    # Latest frame from Picamera2 is RGB
-    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
-
-    # Tune this later if needed
-    lower_blue = np.array([80, 40, 40])
-    upper_blue = np.array([140, 255, 255])
-
-    mask = cv2.inRange(hsv, lower_blue, upper_blue)
-
-    kernel = np.ones((7, 7), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    if not contours:
+    if result.boxes is None:
         return None
 
-    largest = max(contours, key=cv2.contourArea)
-    area = cv2.contourArea(largest)
+    best_box = None
+    best_conf = -1.0
 
-    # Require a reasonably large region
-    min_area = 0.08 * (w * h)
-    if area < min_area:
+    for box in result.boxes:
+        cls_id = int(box.cls[0].item())
+        conf = float(box.conf[0].item())
+
+        if cls_id != POOL_CLASS_ID:
+            continue
+
+        if conf > best_conf:
+            best_conf = conf
+            best_box = box
+
+    if best_box is None:
         return None
 
-    x, y, bw, bh = cv2.boundingRect(largest)
+    x1, y1, x2, y2 = best_box.xyxy[0].tolist()
 
-    # Reject tiny or skinny regions
-    if bw < 0.2 * w or bh < 0.15 * h:
-        return None
+    polygon = [
+        (int(x1), int(y1)),
+        (int(x2), int(y1)),
+        (int(x2), int(y2)),
+        (int(x1), int(y2)),
+    ]
 
-    # Reject regions too high in the frame
-    # Pools in your setup should usually be lower / centered, not near the very top
-    if y < 0.10 * h:
-        return None
-
-    peri = cv2.arcLength(largest, True)
-    approx = cv2.approxPolyDP(largest, 0.02 * peri, True)
-
-    # Require a decent polygon, not a random blob
-    if len(approx) < 4 or len(approx) > 12:
-        return None
-
-    raw_polygon = [(int(pt[0][0]), int(pt[0][1])) for pt in approx]
-    polygon = sanitize_polygon(raw_polygon)
-
-    if polygon is None or len(polygon) < 4:
-        return None
-
-    return polygon
+    return sanitize_polygon(polygon)
 
 
 def create_pool_mask(frame_shape, polygon_points: List[Point]):
