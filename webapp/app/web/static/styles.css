@@ -19,3 +19,24 @@ button:hover { opacity: 0.9; }
   border-radius: 12px;
   background: #f0f2f7;
 }
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.status-box {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid #999;
+}
+
+.status-box.green {
+  background: #22c55e;
+}
+
+.status-box.red {
+  background: #ef4444;
+}

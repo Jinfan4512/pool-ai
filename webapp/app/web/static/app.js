@@ -15,6 +15,7 @@ const els = {
   btnSetBoundary: document.getElementById("btnSetBoundary"),
   btnClearBoundary: document.getElementById("btnClearBoundary"),
   boundaryStatus: document.getElementById("boundaryStatus"),
+  warningBox: document.getElementById("warningBox"),
 };
 
 function showBanner(msg, level) {
@@ -40,6 +41,14 @@ function renderState(state) {
 
   els.lastevent.textContent = state.last_event || "-";
   els.lasttime.textContent = state.last_event_time || "-";
+
+  if (state.in_pool) {
+    els.warningBox.classList.remove("green");
+    els.warningBox.classList.add("red");
+  } else {
+    els.warningBox.classList.remove("red");
+    els.warningBox.classList.add("green");
+  }
 
   if (state.alert_level === "warning") {
     showBanner(state.last_event || "Warning", "warning");

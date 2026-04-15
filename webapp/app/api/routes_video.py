@@ -42,6 +42,10 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
     last_confirmed_polygon = None
     prev_in_pool = False
 
+    candidate_in_pool = False
+    candidate_since = None
+    STATE_HOLD_SECONDS = 1.0
+
     try:
         picam2 = Picamera2()
         picam2.preview_configuration.main.size = RES
@@ -183,19 +187,32 @@ def mjpeg_generator() -> Generator[bytes, None, None]:
             )
 
             STATE.pool_boundary_set = POOL_STATE.boundary_set
-            STATE.object_in_pool = in_pool_now
-            STATE.alive_status = "alive" if in_pool_now else "unknown"
-            STATE.alert_level = "warning" if in_pool_now else "none"
 
-            if in_pool_now and not prev_in_pool:
+            now = time.time()
+
+            # If raw detection changed, start timing it
+            if in_pool_now != candidate_in_pool:
+                candidate_in_pool = in_pool_now
+                candidate_since = now
+
+            # Only commit the new state if it stays stable for 1 second
+            stable_in_pool = prev_in_pool
+            if candidate_since is not None and (now - candidate_since) >= STATE_HOLD_SECONDS:
+                stable_in_pool = candidate_in_pool
+
+            STATE.object_in_pool = stable_in_pool
+            STATE.alive_status = "alive" if stable_in_pool else "unknown"
+            STATE.alert_level = "warning" if stable_in_pool else "none"
+
+            if stable_in_pool and not prev_in_pool:
                 STATE.last_event = "Human or animal detected in pool"
                 STATE.last_event_time = datetime.utcnow()
 
-            if not in_pool_now and prev_in_pool:
+            if not stable_in_pool and prev_in_pool:
                 STATE.last_event = "Object exited pool"
                 STATE.last_event_time = datetime.utcnow()
 
-            prev_in_pool = in_pool_now
+            prev_in_pool = stable_in_pool
 
             if in_pool_now:
                 cv2.putText(
