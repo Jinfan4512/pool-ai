@@ -15,6 +15,7 @@ const els = {
   btnSetBoundary: document.getElementById("btnSetBoundary"),
   btnClearBoundary: document.getElementById("btnClearBoundary"),
   boundaryStatus: document.getElementById("boundaryStatus"),
+  warningBox: document.getElementById("warningBox"),
 };
 
 function showBanner(msg, level) {
@@ -31,35 +32,41 @@ function hideBanner() {
 }
 
 function renderState(state) {
-  els.boundary.textContent = state.pool_boundary_set ? "set" : "not set";
-  els.inpool.textContent = state.object_in_pool ? "YES" : "no";
-  els.alive.textContent = state.alive_status ?? "unknown";
-  els.stream.textContent = state.streaming_enabled ? "ON" : "off";
-  els.lastevent.textContent = state.last_event;
-  els.lasttime.textContent = state.last_event_time;
+  if (!state) return;
 
-  if (state.object_in_pool) {
-    if (state.alert_level === "critical") {
-      showBanner("CRITICAL: Possible drowning risk. View live feed now?", "critical");
-    } else {
-      showBanner("Alert: Object entered pool. View live feed?", "warning");
-    }
+  els.boundary.textContent = state.boundary_set ? "set" : "not set";
+  els.inpool.textContent = state.in_pool ? "yes" : "no";
+  els.alive.textContent = state.alive || "unknown";
+  els.stream.textContent = state.stream_on ? "ON" : "OFF";
+
+  els.lastevent.textContent = state.last_event || "-";
+  els.lasttime.textContent = state.last_event_time || "-";
+
+  if (state.in_pool) {
+    els.warningBox.classList.remove("green");
+    els.warningBox.classList.add("red");
   } else {
-    if (state.streaming_enabled) {
-      showBanner("Object exited pool. Disconnect live feed?", "info");
-    } else {
-      hideBanner();
-    }
+    els.warningBox.classList.remove("red");
+    els.warningBox.classList.add("green");
   }
 
-  if (state.streaming_enabled) els.liveArea.classList.remove("hidden");
-  else els.liveArea.classList.add("hidden");
+  if (state.alert_level === "warning") {
+    showBanner(state.last_event || "Warning", "warning");
+  } else if (state.alert_level === "critical") {
+    showBanner(state.last_event || "Critical alert", "critical");
+  } else {
+    hideBanner();
+  }
 }
 
 async function fetchStatus() {
   const r = await fetch("/api/status");
   const j = await r.json();
-  renderState(j.state);
+
+  // Support both shapes:
+  // 1) direct object
+  // 2) { state: {...} }
+  renderState(j.state || j);
 }
 
 function connectWS() {
@@ -91,10 +98,10 @@ async function controlStream(on) {
   }
 
   if (!on) {
-    // Immediately clear current image stream in browser
     streamKey = null;
     els.liveImg.src = "";
     els.liveImg.removeAttribute("src");
+    els.liveArea.classList.add("hidden");
   }
 
   const url = on ? "/api/stream/on" : "/api/stream/off";
@@ -114,9 +121,9 @@ async function controlStream(on) {
   if (on) {
     streamKey = j.stream_key;
 
-    // Force browser to create a fresh MJPEG request
     els.liveImg.src = "";
     els.liveImg.removeAttribute("src");
+    els.liveArea.classList.remove("hidden");
 
     setTimeout(() => {
       els.liveImg.src = `/video/mjpeg?key=${encodeURIComponent(streamKey)}&t=${Date.now()}`;
@@ -139,10 +146,7 @@ document.addEventListener("click", (e) => {
 });
 
 async function detectPoolBoundary() {
-  const r = await fetch("/api/pool/detect", {
-    method: "POST",
-  });
-
+  const r = await fetch("/api/pool/detect", { method: "POST" });
   const j = await r.json().catch(() => ({}));
 
   if (!r.ok) {
@@ -151,14 +155,12 @@ async function detectPoolBoundary() {
   }
 
   els.boundaryStatus.textContent = "detected (not confirmed)";
-  alert("Pool boundary detected. If it looks correct on the video stream, click Set Boundaries.");
+  await fetchStatus();
+  await refreshPoolStatus();
 }
 
 async function confirmPoolBoundary() {
-  const r = await fetch("/api/pool/confirm", {
-    method: "POST",
-  });
-
+  const r = await fetch("/api/pool/confirm", { method: "POST" });
   const j = await r.json().catch(() => ({}));
 
   if (!r.ok) {
@@ -167,14 +169,12 @@ async function confirmPoolBoundary() {
   }
 
   els.boundaryStatus.textContent = "confirmed";
-  alert("Pool boundary confirmed for this session.");
+  await fetchStatus();
+  await refreshPoolStatus();
 }
 
 async function clearPoolBoundary() {
-  const r = await fetch("/api/pool/clear", {
-    method: "POST",
-  });
-
+  const r = await fetch("/api/pool/clear", { method: "POST" });
   const j = await r.json().catch(() => ({}));
 
   if (!r.ok) {
@@ -183,7 +183,8 @@ async function clearPoolBoundary() {
   }
 
   els.boundaryStatus.textContent = "not set";
-  alert("Pool boundary cleared.");
+  await fetchStatus();
+  await refreshPoolStatus();
 }
 
 async function refreshPoolStatus() {
@@ -206,5 +207,8 @@ els.btnSetBoundary.addEventListener("click", confirmPoolBoundary);
 els.btnClearBoundary.addEventListener("click", clearPoolBoundary);
 
 fetchStatus();
-connectWS();
 refreshPoolStatus();
+connectWS();
+
+setInterval(fetchStatus, 1000);
+setInterval(refreshPoolStatus, 1000);
